@@ -1,0 +1,7 @@
+{
+  "<user_id>": {
+    "user_email": "<user_email>",
+    "refresh_token": "<refresh_token>",
+    "expiry_date": "<expiry_date>"
+  }
+}
