@@ -1,46 +1,32 @@
-import { useState } from "react";
-import { useGoogleLogin } from "@react-oauth/google";
+import { useState, useEffect } from "react";
 
 const API_BASE_URL = "http://localhost:8000/api";
-const SCOPE = "https://www.googleapis.com/auth/calendar";
 
 export default function App() {
-  const [events, setEvents] = useState([]);
+  const [userId, setUserId] = useState(null);
   const [error, setError] = useState(null);
 
-  // const handleLogin = useGoogleLogin({
-  //   onSuccess: async (codeResponse) => {
-  //     console.log(codeResponse)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const userId = urlParams.get("userId");
 
-  //     await fetch(`${API_BASE_URL}/auth`, {
-  //       method: "POST",
-  //       headers: {
-  //         "Content-Type": "application/json",
-  //       },
-  //       body: JSON.stringify({
-  //         access_token: tokenResponse.access_token,
-  //       }),
-  //     });
-  //   },
-  //   onError: (error) => setError(error.message),
-  //   scope: SCOPE,
-  //   flow: 'auth-code',
-  // });
+    if (userId) {
+      setUserId(userId);
+      window.history.replaceState({}, document.title, "/");
+    }
+  }, []);
 
-  async function handleLogin() {
-    window.location.href = "http://localhost:8000/api/auth";
-  }
-
-  const fetchEvents = async () => {
-    const response = await fetch(`${API_BASE_URL}/recent-events`, {
-      method: "GET",
-    });
-    const data = await response.json();
-    setEvents(data.events);
+  const handleLogin = async () => {
+    window.location.href = `${API_BASE_URL}/auth`;
   };
 
   const handleNewEvent = async (e) => {
     e.preventDefault();
+
+    if (!userId) {
+      setError("請先登入！");
+      return;
+    }
 
     const form = e.target;
     const eventName = form.eventName.value;
@@ -59,14 +45,15 @@ export default function App() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ event }),
+        body: JSON.stringify({
+          userId: userId,
+          event: event,
+        }),
       });
 
-      if (response.status === 200) {
-        fetchEvents();
-      } else {
-        alert("Failed to create event.");
-      }
+      if (response.status !== 200) throw new Error("Failed to create event");
+
+      alert("成功建立活動！");
     } catch (error) {
       setError(error.message);
     }
@@ -77,7 +64,6 @@ export default function App() {
       <h1>Google Calendar Events</h1>
       <div style={{ display: "flex", gap: "6px" }}>
         <button onClick={handleLogin}>Login with Google</button>
-        <button onClick={fetchEvents}>Show recent event</button>
       </div>
 
       {error && <p style={{ color: "red" }}>{error}</p>}
@@ -95,13 +81,6 @@ export default function App() {
         <br />
         <button type="submit">Create Event</button>
       </form>
-
-      <h2>Upcoming Events</h2>
-      <ul>
-        {events.map((event, index) => (
-          <li key={index}>{event.summary}</li>
-        ))}
-      </ul>
     </div>
   );
 }
