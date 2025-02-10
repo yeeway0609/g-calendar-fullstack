@@ -17,7 +17,6 @@ app.use(
 );
 app.use(express.json());
 
-let storedAccessToken = null; // 儲存 access_token，這裡是簡單示範，實際情況應儲存在資料庫
 let calendarClient = null;
 
 const SCOPES = [
@@ -95,14 +94,17 @@ function getAuthClient(userId) {
   );
 
   oauthClient.setCredentials({ refresh_token: tokens[userId].refresh_token });
+  // TODO: 檢查 access_token 是否過期，如果過期則使用 refresh_token 取得新的 access_token
+
   return oauthClient;
 }
 
-/** API 1: 儲存 access_token 並初始化 Google API 客戶端 */
+/** API 1: 導向到 Google 登入頁 */
 app.get("/api/auth", (req, res) => {
   res.redirect(authorizationUrl);
 });
 
+// 用戶授權後的 callback，會取得 code 並換取 tokens，再將用戶導回到 app 首頁
 app.get("/auth/callback", async (req, res) => {
   let q = url.parse(req.url, true).query;
 
@@ -116,6 +118,7 @@ app.get("/auth/callback", async (req, res) => {
   }
 });
 
+// 當取得 tokens 時，將用戶的 refresh_token 儲存到本地 tokens.json
 oauthClient.on("tokens", async (tokens) => {
   const ticket = await oauthClient.verifyIdToken({
     idToken: tokens.id_token,
@@ -129,17 +132,12 @@ oauthClient.on("tokens", async (tokens) => {
   if (tokens.refresh_token) {
     saveTokensToFile(userId, userEmail, tokens);
   }
-
-  console.log("Creating event for user:", userId);
-  createEvent(userId, FAKE_EVENT);
 });
 
 /** 在指定使用者的 Google 日曆上新增活動 */
 async function createEvent(userId, event) {
   try {
     const oauthClient = getAuthClient(userId);
-    const { credentials } = await oauthClient.refreshAccessToken(); // 取得新的 access_token
-    oauthClient.setCredentials(credentials);
 
     const calendar = google.calendar({ version: "v3", auth: oauthClient });
 
@@ -156,47 +154,23 @@ async function createEvent(userId, event) {
   }
 }
 
-/** API 2: 取得近期活動 */
-app.get("/api/recent-events", async (req, res) => {
-  if (!calendarClient) {
-    return res.status(400).json({ error: "Calendar client is not initialized" });
-  }
-
-  try {
-    const response = await calendarClient.events.list({
-      calendarId: "primary",
-      timeMin: new Date().toISOString(),
-      maxResults: 10,
-      singleEvents: true,
-      orderBy: "startTime",
-    });
-
-    const events = response.data.items || [];
-    return res.json({ events });
-  } catch (error) {
-    console.error("Error fetching events:", error);
-    return res.status(500).json({ error: "Failed to fetch events" });
-  }
-});
-
-/** API 3: 新增活動  */
+/** API 2: 新增活動  */
 app.post("/api/create-event", async (req, res) => {
-  if (!calendarClient) {
-    return res.status(400).json({ error: "Google Calendar client is not initialized" });
+  const { userId, event } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ error: "Missing userId" });
   }
 
   try {
-    const event = req.body.event;
-    console.log("Creating event:", event);
+    const response = await createEvent(userId, event);
 
-    const response = await calendarClient.events.insert({
-      calendarId: "primary",
-      resource: event,
-    });
+    if (response.error === "REAUTH_REQUIRED") {
+      return res.status(401).json({ error: "Reauthorization required" });
+    }
 
-    return res.status(200).json({ message: "Event created", event: response.data });
+    return res.status(200).json({ message: "Event created", event: response });
   } catch (error) {
-    console.error("Error creating event:", error);
     return res.status(500).json({ error: "Failed to create event" });
   }
 });
