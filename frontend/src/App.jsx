@@ -8,22 +8,28 @@ export default function App() {
   const [events, setEvents] = useState([]);
   const [error, setError] = useState(null);
 
-  const handleLogin = useGoogleLogin({
-    onSuccess: async (tokenResponse) => {
-      // 把 access token 傳到後端
-      await fetch(`${API_BASE_URL}/auth`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          access_token: tokenResponse.access_token,
-        }),
-      });
-    },
-    onError: (error) => setError(error.message),
-    scope: SCOPE,
-  });
+  // const handleLogin = useGoogleLogin({
+  //   onSuccess: async (codeResponse) => {
+  //     console.log(codeResponse)
+
+  //     await fetch(`${API_BASE_URL}/auth`, {
+  //       method: "POST",
+  //       headers: {
+  //         "Content-Type": "application/json",
+  //       },
+  //       body: JSON.stringify({
+  //         access_token: tokenResponse.access_token,
+  //       }),
+  //     });
+  //   },
+  //   onError: (error) => setError(error.message),
+  //   scope: SCOPE,
+  //   flow: 'auth-code',
+  // });
+
+  async function handleLogin() {
+    window.location.href = "http://localhost:8000/api/auth";
+  }
 
   const fetchEvents = async () => {
     const response = await fetch(`${API_BASE_URL}/recent-events`, {
