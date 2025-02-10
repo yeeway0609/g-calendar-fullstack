@@ -8,36 +8,21 @@ require("dotenv").config();
 
 const APP_ORIGIN = "http://localhost:5173";
 const PORT = 8000;
-const app = express();
-app.use(
-  cors({
-    origin: APP_ORIGIN,
-    methods: ["GET", "POST"],
-  })
-);
-app.use(express.json());
-
-let calendarClient = null;
-
+const TOKEN_PATH = path.join(__dirname, "tokens.json");
 const SCOPES = [
   "https://www.googleapis.com/auth/userinfo.profile",
   "https://www.googleapis.com/auth/userinfo.email",
   "https://www.googleapis.com/auth/calendar",
 ];
 
-const FAKE_EVENT = {
-  summary: "會議測試",
-  location: "Google Meet",
-  description: "這是一個測試會議",
-  start: {
-    dateTime: "2025-02-12T10:00:00+08:00",
-    timeZone: "Asia/Taipei",
-  },
-  end: {
-    dateTime: "2025-02-12T11:00:00+08:00",
-    timeZone: "Asia/Taipei",
-  },
-};
+const app = express();
+app.use(express.json());
+app.use(
+  cors({
+    origin: APP_ORIGIN,
+    methods: ["GET", "POST"],
+  })
+);
 
 const oauthClient = new google.auth.OAuth2(
   process.env.GCP_CLIENT_ID,
@@ -50,8 +35,6 @@ const authorizationUrl = oauthClient.generateAuthUrl({
   scope: SCOPES,
   include_granted_scopes: true,
 });
-
-const TOKEN_PATH = path.join(__dirname, "tokens.json");
 
 // 讀取 tokens.json
 function readTokensFile() {
@@ -70,6 +53,7 @@ function readTokensFile() {
 function saveTokensToFile(userId, userEmail, tokens) {
   let data = readTokensFile();
 
+  // REFACTOR: 如果 tokens.json 中已經有這個 userId 的資料，好像就不用再更新
   data[userId] = {
     user_email: userEmail,
     refresh_token: tokens.refresh_token,
@@ -80,6 +64,7 @@ function saveTokensToFile(userId, userEmail, tokens) {
   console.log("Tokens saved for user:", userId);
 }
 
+/** 根據 userId 取得授權的 OAuth2 client */
 function getAuthClient(userId) {
   const tokens = readTokensFile();
 
@@ -99,12 +84,7 @@ function getAuthClient(userId) {
   return oauthClient;
 }
 
-/** API 1: 導向到 Google 登入頁 */
-app.get("/api/auth", (req, res) => {
-  res.redirect(authorizationUrl);
-});
-
-// 用戶授權後的 callback，會取得 code 並換取 tokens，再將用戶導回到 app 首頁
+// 用戶授權後的 callback，會取得 code 並換取 tokens，再將用戶導回到 app 首頁並附帶 userId
 app.get("/auth/callback", async (req, res) => {
   let q = url.parse(req.url, true).query;
 
@@ -114,23 +94,22 @@ app.get("/auth/callback", async (req, res) => {
     let { tokens } = await oauthClient.getToken(q.code);
     oauthClient.setCredentials(tokens);
 
-    res.redirect(APP_ORIGIN);
-  }
-});
+    // 當取得 tokens 時，將用戶的 refresh_token 儲存到本地 tokens.json
+    const ticket = await oauthClient.verifyIdToken({
+      idToken: tokens.id_token,
+    });
 
-// 當取得 tokens 時，將用戶的 refresh_token 儲存到本地 tokens.json
-oauthClient.on("tokens", async (tokens) => {
-  const ticket = await oauthClient.verifyIdToken({
-    idToken: tokens.id_token,
-  });
+    const payload = ticket.getPayload();
+    const userId = payload.sub;
+    const userEmail = payload.email;
 
-  const payload = ticket.getPayload();
-  const userId = payload.sub;
-  const userEmail = payload.email;
+    if (tokens.refresh_token) {
+      // 只有用戶第一次授權時才會收到 refresh_token，之後就不會只會收到 access_token
+      // 除非他在這裡撤銷了授權：https://myaccount.google.com/connections/overview
+      saveTokensToFile(userId, userEmail, tokens);
+    }
 
-  // 只有用戶第一次授權時會收到 refresh_token，之後就不會再收到，除非他撤銷了授權
-  if (tokens.refresh_token) {
-    saveTokensToFile(userId, userEmail, tokens);
+    res.redirect(`${APP_ORIGIN}?userId=${userId}`);
   }
 });
 
@@ -153,6 +132,11 @@ async function createEvent(userId, event) {
     throw new Error("Failed to create event");
   }
 }
+
+/** API 1: 導向到 Google 登入頁 */
+app.get("/api/auth", (req, res) => {
+  res.redirect(authorizationUrl);
+});
 
 /** API 2: 新增活動  */
 app.post("/api/create-event", async (req, res) => {
